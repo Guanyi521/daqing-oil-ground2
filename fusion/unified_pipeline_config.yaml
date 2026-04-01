@@ -1,0 +1,82 @@
+# ==========================================
+# RFM Stage 2: Unified Pipeline 配置文件
+# ==========================================
+
+# 1. 数据集配置 (Data Configuration)
+data:
+  # 训练数据项目路径 (支持多个项目)
+  # ⚠️ 注意：运行前请确保这里的路径是你本地真实的有效数据路径
+  train_dirs:
+    - "D:/YihengZhu/jbgs-lma/proj-phase1/eclipse-models/1c/water_flooding"
+  train_names:
+    - "BYEPD93"
+
+  # 特征字段
+  dynamic_fields: ["PRESSURE", "SWAT"]
+  static_fields: ["PORO", "PERMX"]
+
+  # 滑动窗口设置
+  nt_width: 4           # Transformer 一次前向看到的历史时间步长度
+  stride: 1             # 窗口滑动的步长
+
+  # 物理网格参数 (🌟 已严格对齐 Stage 1 的 40x40x10)
+  n_theta: 40
+  n_R: 10
+  model_nz: 40
+  maxR: 1000.0
+  total_z_depth: 50.0
+
+# 2. 训练超参数 (Training Hyperparameters)
+training:
+  batch_size: 2
+  max_epochs: 100
+  learning_rate: 0.0001
+  nums_loading_projects: 2 # 内存中并发缓存的项目数量
+
+# 3. 预训练权重路径 (Stage 1 Checkpoints)
+stage1_checkpoints:
+  vq_vae_path: "checkpoints/vq_vae/best_model.ckpt"
+  geo_vae_poro_path: "checkpoints/geo_vae/poro_best_model.ckpt"
+  geo_vae_perm_path: "checkpoints/geo_vae/perm_best_model.ckpt"
+
+# 4. Stage 1 子模型初始化配置
+vq_vae_config:
+  in_channels: 5
+  hidden_dim: 32
+  latent_dim: 64
+  num_embeddings: 1024
+  commitment_cost: 0.25
+  num_res_blocks: 2
+  num_attn_heads: 8
+  compress_shape: [2, 2, 2] # 空间压缩比例
+
+geo_vae_poro_config:
+  poro_min: 0.0
+  poro_max: 0.4
+  latent_channels: 4        # 🌟 已对齐: 真实孔隙度训练维度 4
+
+geo_vae_perm_config:
+  perm_min: 0.1
+  perm_max: 10000.0
+  latent_channels: 8        # 🌟 已对齐: 真实渗透率训练维度 8
+
+# 5. Stage 2 Transformer 引擎配置
+transformer_config:
+  vocab_size: 1025          # 1024 + 1(PAD/Mask token)
+  d_model: 128
+  num_heads: 8
+  head_splits: [2, 2, 4]    # 注意: 请确保你的 3 个特征流分配的注意力头数之和不大于 d_model 的容量
+  num_layers: 6
+  hidden_dim: 1024
+  max_nt_width: 4           # 与 data.nt_width 保持一致或更大
+  Ld: 2000                  # 🌟 已重算: Latent 空间的 Token 数量 (20 * 20 * 5 = 2000)
+  grid_shape: [20, 20, 5]   # 🌟 已重算: Latent 空间的网格形状 [nz_lat, n_theta_lat, n_R_lat]
+
+# 6. Pipeline 顶层控制参数
+model:
+  # 动态特征维度 (井控指令的维度)
+  dynamic_feature_dim: 12   # ⚠️ 注意：确保你底层提取的井控数组确实是 12 维的
+
+  # 模式开关
+  freeze_vqvae: true        # 训练 Stage 2 时，是否冻结 VQ-VAE
+  freeze_poro_vae: true     # 训练 Stage 2 时，是否冻结 Geo-VAE
